@@ -13,6 +13,16 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+type ArticleFetcher interface {
+	FetchArticles(id string, size int) ([]Article, error)
+}
+
+type DefaultArticleFetcher struct{}
+
+func (daf DefaultArticleFetcher) FetchArticles(id string, size int) ([]Article, error) {
+	return getArticles(id, size)
+}
+
 // attributes represents the attributes of an article.
 type attributes struct {
 	PublishOn time.Time `json:"publishOn"`
@@ -37,7 +47,8 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
-	r.Get("/api/v1/articles", getChiArticles)
+	fetcher := DefaultArticleFetcher{}
+	r.Get("/api/v1/articles", articleHandler(fetcher))
 	r.Post("/news/v2/save-article", saveChiArticle)
 
 	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
@@ -48,10 +59,15 @@ func main() {
 	http.ListenAndServe(":3000", r)
 }
 
+func articleHandler(fetcher ArticleFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		getChiArticles(fetcher, w, r)
+	}
+}
+
 // getChiArticles is the handler function for the "/api/v1/articles" endpoint.
 // It retrieves articles based on the provided ID and size parameters.
-func getChiArticles(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Fetching Articles..."))
+func getChiArticles(fetcher ArticleFetcher, w http.ResponseWriter, r *http.Request) {
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
@@ -77,7 +93,7 @@ func getChiArticles(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer wg.Done()
 		var err error
-		articles, err = getArticles(id, size)
+		articles, err = fetcher.FetchArticles(id, size)
 		if err != nil {
 			errChan <- err
 			return
@@ -93,8 +109,7 @@ func getChiArticles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process articles and respond
-	// Assuming processing and response code goes here
-
+	// Assuming processing and response code goes here<s
 	var articleResponse articleResponse
 
 	for _, article := range articles {
