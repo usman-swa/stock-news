@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi"
@@ -50,36 +51,49 @@ func main() {
 // getChiArticles is the handler function for the "/api/v1/articles" endpoint.
 // It retrieves articles based on the provided ID and size parameters.
 func getChiArticles(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Hello, World!"))
+	w.Write([]byte("Fetching Articles..."))
 
 	id := r.URL.Query().Get("id")
-
 	if id == "" {
 		http.Error(w, "id is required", http.StatusBadRequest)
 		return
 	}
 
 	sizeStr := r.URL.Query().Get("size")
-
-	// Default values for size and number if not provided
 	size, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid size value", http.StatusBadRequest)
 		return
 	}
-
 	if size == 0 {
 		size = 10 // Default size
 	}
 
+	var wg sync.WaitGroup
 	var articles []Article
-	var error error
-	articles, err = getArticles(id, size)
+	errChan := make(chan error, 1) // Buffered channel for error handling
 
-	if error != nil {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		articles, err = getArticles(id, size)
+		if err != nil {
+			errChan <- err
+			return
+		}
+	}()
+
+	wg.Wait()      // Wait for the Go routine to finish
+	close(errChan) // Close the channel
+
+	if err, ok := <-errChan; ok {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Process articles and respond
+	// Assuming processing and response code goes here
 
 	var articleResponse articleResponse
 
