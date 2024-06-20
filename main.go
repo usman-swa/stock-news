@@ -5,160 +5,71 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
-	"sync"
-	"time"
 
 	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/v5/middleware"
 )
+
+type Article struct {
+	Symbol    string `json:"symbol"`
+	CreatedAt string `json:"created_at"`
+	Headline  string `json:"headline"`
+}
 
 type ArticleFetcher interface {
 	FetchArticles(id string, size int) ([]Article, error)
 }
 
-type DefaultArticleFetcher struct{}
+type ArticleFetcherImpl struct{}
 
-func (daf DefaultArticleFetcher) FetchArticles(id string, size int) ([]Article, error) {
-	return getArticles(id, size)
-}
-
-// attributes represents the attributes of an article.
-type attributes struct {
-	PublishOn time.Time `json:"publishOn"`
-	Title     string    `json:"title"`
-}
-
-// dataItem represents a single item in the article response data.
-type dataItem struct {
-	Attributes attributes `json:"attributes"`
-}
-
-// articleResponse represents the response structure for the articles API.
 type articleResponse struct {
-	Data []dataItem `json:"data"`
+	Data []Article `json:"data"`
 }
 
-// main is the entry point of the application.
-func main() {
-	r := chi.NewRouter()
-
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
-
-	fetcher := DefaultArticleFetcher{}
-	r.Get("/api/v1/articles", articleHandler(fetcher))
-	r.Post("/news/v2/save-article", saveChiArticle)
-
-	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
-	})
-
-	fmt.Println("Server is running on port 3000")
-	http.ListenAndServe(":3000", r)
+func (a *ArticleFetcherImpl) FetchArticles(id string, size int) ([]Article, error) {
+	return FetchArticles(id, size)
 }
 
-func articleHandler(fetcher ArticleFetcher) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		getChiArticles(fetcher, w, r)
-	}
+type ArticlwSave interface {
+	SaveArticle(article Article) error
 }
 
-// getChiArticles is the handler function for the "/api/v1/articles" endpoint.
-// It retrieves articles based on the provided ID and size parameters.
-func getChiArticles(fetcher ArticleFetcher, w http.ResponseWriter, r *http.Request) {
+type ArticleSaveImpl struct{}
 
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
-		return
-	}
-
-	sizeStr := r.URL.Query().Get("size")
-	size, err := strconv.Atoi(sizeStr)
-	if err != nil {
-		http.Error(w, "Invalid size value", http.StatusBadRequest)
-		return
-	}
-	if size == 0 {
-		size = 10 // Default size
-	}
-
-	var wg sync.WaitGroup
-	var articles []Article
-	errChan := make(chan error, 1) // Buffered channel for error handling
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		var err error
-		articles, err = fetcher.FetchArticles(id, size)
-		if err != nil {
-			errChan <- err
-			return
-		}
-	}()
-
-	wg.Wait()      // Wait for the Go routine to finish
-	close(errChan) // Close the channel
-
-	if err, ok := <-errChan; ok {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Process articles and respond
-	// Assuming processing and response code goes here<s
-	var articleResponse articleResponse
-
-	for _, article := range articles {
-		articleResponse.Data = append(articleResponse.Data, dataItem{
-			Attributes: attributes{
-				PublishOn: article.CreatedAt,
-				Title:     article.Headline,
-			},
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(articleResponse)
+func (a *ArticleSaveImpl) SaveArticle(article Article) error {
+	return SaveArticle(article)
 }
 
-// saveChiArticle is the handler function for the "/news/v2/save-article" endpoint.
-// It saves the provided article to the database.
-func saveChiArticle(w http.ResponseWriter, r *http.Request) {
-	var article Article // Assuming Article is a struct representing your article data
-
-	// Decode JSON from request body
-	err := json.NewDecoder(r.Body).Decode(&article)
-	if err != nil {
-		http.Error(w, "Error decoding JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	err = saveArticle(article)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(article)
-}
-
-// Article represents an article with symbol, creation date, and headline.
-type Article struct {
-	Symbol    string
-	CreatedAt time.Time
-	Headline  string
-}
-
-// getArticles retrieves articles from the database based on the provided ID and size.
-func getArticles(id string, size int) ([]Article, error) {
+func SaveArticle(article Article) error {
 	// Fetch articles from database
+	file, err := os.ReadFile("db/articles.json")
+	if err != nil {
+		return err
+	}
 
+	var allArticles []Article
+
+	// Decode the JSON file into the articles slice
+	if err := json.Unmarshal(file, &allArticles); err != nil {
+		return err
+	}
+
+	allArticles = append(allArticles, article)
+
+	// Encode the articles slice into a JSON file
+	data, err := json.Marshal(allArticles)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile("db/articles.json", data, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func FetchArticles(id string, size int) ([]Article, error) {
+	// Fetch articles from database
 	file, err := os.ReadFile("db/articles.json")
 	if err != nil {
 		return nil, err
@@ -173,6 +84,7 @@ func getArticles(id string, size int) ([]Article, error) {
 
 	// Filter the articles based on the id
 	var filteredArticles []Article
+
 	for _, article := range allArticles {
 		if article.Symbol == id {
 			filteredArticles = append(filteredArticles, article)
@@ -191,33 +103,63 @@ func getArticles(id string, size int) ([]Article, error) {
 	return filteredArticles, nil
 }
 
-// saveArticle saves the provided article to the database.
-func saveArticle(article Article) error {
-	// Fetch articles from database
-	file, err := os.ReadFile("db/articles.json")
-	if err != nil {
-		return err
+func main() {
+	// Create a new router
+	r := chi.NewRouter()
+
+	// Create a new article fetcher
+	articleFetcher := &ArticleFetcherImpl{}
+	articleSaver := &ArticleSaveImpl{}
+	// Add a new route to the router
+	r.Get("/api/v1/articles", getChiArticles(articleFetcher))
+	r.Post("/api/v1/save-articles", saveChiArticle(articleSaver))
+
+	fmt.Println("Server is running on port 8080")
+	// Start the HTTP server
+	http.ListenAndServe(":8080", r)
+}
+
+func saveChiArticle(articleSaver ArticlwSave) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Parse the request body
+		var article Article
+		if err := json.NewDecoder(r.Body).Decode(&article); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Save the article
+		if err := articleSaver.SaveArticle(article); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Write a success response
+		w.Write([]byte("Article saved successfully"))
 	}
+}
 
-	var allArticles []Article
+func getChiArticles(articleFetcher ArticleFetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Parse the query parameters
+		id := r.URL.Query().Get("id")
+		size := 5
+		if s := r.URL.Query().Get("size"); s != "" {
+			size = 5
+		}
 
-	// Decode the JSON file into the articles slice
-	if err := json.Unmarshal(file, &allArticles); err != nil {
-		return err
+		// Fetch the articles
+		articles, err := articleFetcher.FetchArticles(id, size)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Create a response
+		response := articleResponse{Data: articles}
+
+		// Write the response
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
 	}
-
-	allArticles = append(allArticles, article)
-
-	// Encode the articles slice into a JSON file
-	articlesJSON, err := json.Marshal(allArticles)
-	if err != nil {
-		return err
-	}
-
-	// Write the JSON file to the disk
-	if err := os.WriteFile("db/articles.json", articlesJSON, 0644); err != nil {
-		return err
-	}
-
-	return nil
 }
