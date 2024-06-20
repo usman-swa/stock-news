@@ -1,23 +1,27 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"stock-news/db/article_service" // Adjust the import path as necessary
+	"os"
+	"os/signal"
+	"stock-news/db/article_service"
 	"strconv"
+	"sync"
+	"syscall"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
 
-// FetchRequest defines the structure for a fetch request
 type FetchRequest struct {
 	ID       string
 	Size     int
-	Response chan FetchResponse // Channel to send the response back
+	Response chan FetchResponse
 }
 
-// FetchResponse defines the structure for a fetch response
 type FetchResponse struct {
 	Articles []article_service.Article
 	Error    error
@@ -25,65 +29,79 @@ type FetchResponse struct {
 
 func main() {
 	r := chi.NewRouter()
-
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
+	r.Use(middleware.Logger, middleware.Recoverer, middleware.RequestID)
 
 	fetcher := &article_service.ArticleFetcherImpl{}
 	saver := &article_service.ArticleSaverImpl{}
-
 	articleService := article_service.NewArticleService(fetcher, saver)
 
-	// Create a channel for save article requests
 	saveArticleChan := make(chan article_service.Article)
-
-	// Create a channel for fetch article requests
 	fetchArticleChan := make(chan FetchRequest)
+	var wg sync.WaitGroup
 
-	// Start a goroutine to process save requests
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for article := range saveArticleChan {
 			if err := articleService.SaveArticle(article); err != nil {
-				// Handle error - Note: This is running in a separate goroutine
-				// You might want to log this error or handle it appropriately
+				fmt.Println("Error saving article:", err)
 			}
-			// Placeholder statement to indicate the branch is intentionally empty
-			// TODO: Handle error or log it appropriately
-			_ = article
 		}
 	}()
 
-	// Start a goroutine to process fetch requests
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for req := range fetchArticleChan {
 			articles, err := articleService.FetchArticles(req.ID, req.Size)
 			req.Response <- FetchResponse{Articles: articles, Error: err}
 		}
 	}()
 
-	r.Post("/api/v1/articles", func(w http.ResponseWriter, r *http.Request) {
+	setupHTTPHandlers(r, saveArticleChan, fetchArticleChan)
+
+	srv := &http.Server{Addr: ":8080", Handler: r}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("listen: %s\n", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	fmt.Println("Shutting down server...")
+
+	if err := srv.Shutdown(context.Background()); err != nil {
+		fmt.Printf("HTTP server Shutdown: %v", err)
+	}
+
+	close(saveArticleChan)
+	close(fetchArticleChan)
+	wg.Wait()
+}
+
+func setupHTTPHandlers(r *chi.Mux, saveArticleChan chan article_service.Article, fetchArticleChan chan FetchRequest) {
+	r.Post("/api/v1/save-articles", func(w http.ResponseWriter, r *http.Request) {
 		var article article_service.Article
 		if err := json.NewDecoder(r.Body).Decode(&article); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		// Send the article to the save channel instead of saving directly
 		saveArticleChan <- article
-
 		w.WriteHeader(http.StatusCreated)
 	})
 
 	r.Get("/api/v1/articles", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		sizeStr := r.URL.Query().Get("size")
-		size, _ := strconv.Atoi(sizeStr) // Simplified error handling
+		size, _ := strconv.Atoi(sizeStr)
 
 		responseChan := make(chan FetchResponse)
 		fetchArticleChan <- FetchRequest{ID: id, Size: size, Response: responseChan}
 
-		// Wait for the response
 		response := <-responseChan
 		if response.Error != nil {
 			http.Error(w, response.Error.Error(), http.StatusInternalServerError)
@@ -93,6 +111,4 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response.Articles)
 	})
-
-	http.ListenAndServe(":8080", r)
 }
