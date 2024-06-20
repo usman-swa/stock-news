@@ -1,3 +1,4 @@
+// Package article_service provides functionality for fetching and saving articles.
 package article_service
 
 import (
@@ -5,39 +6,46 @@ import (
 	"os"
 )
 
+// Article represents a news article.
 type Article struct {
 	Symbol    string `json:"symbol"`
 	CreatedAt string `json:"created_at"`
 	Headline  string `json:"headline"`
 }
 
+// ArticleService is a service that interacts with the article data.
 type ArticleService struct {
 	articleFetcher ArticleFetcher
 	articleSaver   ArticleSaver
 }
 
-// ArticleFetcher interface
+// ArticleFetcher is an interface for fetching articles.
 type ArticleFetcher interface {
 	FetchArticles(id string, size int) ([]Article, error)
 }
 
+// ArticleFetcherImpl is an implementation of the ArticleFetcher interface.
 type ArticleFetcherImpl struct{}
 
+// FetchArticles fetches articles based on the given ID and size.
 func (a *ArticleFetcherImpl) FetchArticles(id string, size int) ([]Article, error) {
 	return FetchArticles(id, size)
 }
 
-// ArticleSaver interface
+// ArticleSaver is an interface for saving articles.
 type ArticleSaver interface {
 	SaveArticle(article Article) error
 }
 
+// ArticleSaverImpl is an implementation of the ArticleSaver interface.
 type ArticleSaverImpl struct{}
 
+// SaveArticle saves the given article.
 func (a *ArticleSaverImpl) SaveArticle(article Article) error {
 	return SaveArticle(article)
 }
 
+// NewArticleService creates a new instance of ArticleService with the provided fetcher and saver.
 func NewArticleService(fetcher ArticleFetcher, saver ArticleSaver) *ArticleService {
 	return &ArticleService{
 		articleFetcher: fetcher,
@@ -45,14 +53,17 @@ func NewArticleService(fetcher ArticleFetcher, saver ArticleSaver) *ArticleServi
 	}
 }
 
+// FetchArticles fetches articles based on the given ID and size using the article fetcher.
 func (a *ArticleService) FetchArticles(id string, size int) ([]Article, error) {
 	return a.articleFetcher.FetchArticles(id, size)
 }
 
+// SaveArticle saves the given article using the article saver.
 func (a *ArticleService) SaveArticle(article Article) error {
 	return a.articleSaver.SaveArticle(article)
 }
 
+// SaveArticle saves the given article to the database.
 func SaveArticle(article Article) error {
 	// Fetch articles from database
 	file, err := os.ReadFile("db/articles.json")
@@ -82,6 +93,7 @@ func SaveArticle(article Article) error {
 	return nil
 }
 
+// FetchArticles fetches articles from the database based on the given ID and size.
 func FetchArticles(id string, size int) ([]Article, error) {
 	// Fetch articles from database
 	file, err := os.ReadFile("db/articles.json")
