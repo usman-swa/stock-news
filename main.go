@@ -16,12 +16,14 @@ import (
 	"github.com/go-chi/chi/middleware"
 )
 
+// FetchRequest represents a request to fetch articles.
 type FetchRequest struct {
 	ID       string
 	Size     int
 	Response chan FetchResponse
 }
 
+// FetchResponse represents the response of a fetch request.
 type FetchResponse struct {
 	Articles []article_service.Article
 	Error    error
@@ -83,6 +85,7 @@ func main() {
 	wg.Wait()
 }
 
+// setupHTTPHandlers sets up the HTTP request handlers.
 func setupHTTPHandlers(r *chi.Mux, saveArticleChan chan article_service.Article, fetchArticleChan chan FetchRequest) {
 	r.Post("/api/v1/save-articles", func(w http.ResponseWriter, r *http.Request) {
 		var article article_service.Article
